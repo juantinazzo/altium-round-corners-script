@@ -1,7 +1,7 @@
 Const
     MyPI = 3.14159265358979323846;
 
-// --- Grundlegende Mathe-Funktionen ---
+// --- Basic math helpers ---
 Function ArcTan2(Y, X: Double): Double;
 Begin
     If X > 0.0 Then Result := ArcTan(Y/X)
@@ -36,22 +36,80 @@ Begin
     If (d1 >= -0.1) And (d1 <= span + 0.1) Then Result := True Else Result := False;
 End;
 
+// Locale-independent parsing: accepts both '.' and ',' as decimal separator.
 Function StringToFloatSafe(S: String): Double;
-Var I: Integer; S_dot, S_comma: String; val: Double; success: Boolean;
+Var
+    I, L, SepCount, SepPos: Integer;
+    Ch: Char;
+    NumStr, FracStr: String;
+    IsNeg, HasSep: Boolean;
+    IntVal, FracVal, FracScale: Double;
 Begin
-    S_dot := S; S_comma := S;
-    For I := 1 To Length(S_dot) Do If S_dot[I] = ',' Then S_dot[I] := '.';
-    For I := 1 To Length(S_comma) Do If S_comma[I] = '.' Then S_comma[I] := ',';
-    success := False;
-    Try val := StrToFloat(S_comma); success := True; Except End;
-    If Not success Then Begin Try val := StrToFloat(S_dot); success := True; Except End; End;
-    If success Then Result := val Else Result := -1.0;
+    Result := -1.0;
+    L := Length(S);
+    If L = 0 Then Exit;
+
+    SepCount := 0; SepPos := 0; IsNeg := False; HasSep := False; NumStr := '';
+
+    For I := 1 To L Do
+    Begin
+        Ch := S[I];
+        If (Ch = ' ') Or (Ch = #9) Then
+        Begin
+            // skip whitespace
+        End
+        Else If Ch = '+' Then
+        Begin
+            // skip leading plus
+        End
+        Else If Ch = '-' Then
+        Begin
+            If NumStr = '' Then IsNeg := True Else Exit;
+        End
+        Else If (Ch = '.') Or (Ch = ',') Then
+        Begin
+            Inc(SepCount);
+            If SepCount > 1 Then Exit;
+            HasSep := True;
+            SepPos := Length(NumStr);
+        End
+        Else If (Ch >= '0') And (Ch <= '9') Then
+        Begin
+            NumStr := NumStr + Ch;
+        End
+        Else Exit;
+    End;
+
+    If NumStr = '' Then Exit;
+
+    IntVal := 0.0;
+    If Not HasSep Then
+    Begin
+        For I := 1 To Length(NumStr) Do
+            IntVal := IntVal * 10.0 + (Ord(NumStr[I]) - Ord('0'));
+    End
+    Else
+    Begin
+        FracStr := Copy(NumStr, SepPos + 1, Length(NumStr));
+        For I := 1 To SepPos Do
+            IntVal := IntVal * 10.0 + (Ord(NumStr[I]) - Ord('0'));
+        FracVal := 0.0; FracScale := 1.0;
+        For I := 1 To Length(FracStr) Do
+        Begin
+            FracVal := FracVal * 10.0 + (Ord(FracStr[I]) - Ord('0'));
+            FracScale := FracScale * 10.0;
+        End;
+        IntVal := IntVal + (FracVal / FracScale);
+    End;
+
+    If IsNeg Then IntVal := -IntVal;
+    Result := IntVal;
 End;
 
 Function CToMM(C: Integer): Double; Begin Result := C / 393700.787; End;
 Function MMToC(M: Double): Integer; Begin Result := Round(M * 393700.787); End;
 
-// --- Hauptprogramm Universal Fillet ---
+// --- Main routine: Universal Fillet ---
 Procedure CreateUniversalFillet;
 Var
     Board                  : IPCB_Board;
@@ -74,12 +132,12 @@ Var
     InputStr               : String;
     Res                    : Integer;
 
-    // Backup Variablen für Undo-Funktion
+    // Backup variables for the undo function
     Orig_T1_X1, Orig_T1_Y1, Orig_T1_X2, Orig_T1_Y2 : Integer;
     Orig_T2_X1, Orig_T2_Y1, Orig_T2_X2, Orig_T2_Y2 : Integer;
     Orig_Arc_Start, Orig_Arc_End : Double;
 
-    // Mathe Variablen (Global)
+    // Math variables (global)
     N_X, N_Y               : Double; 
     E1_X, E1_Y, E2_X, E2_Y : Double; 
     v1x, v1y, v2x, v2y     : Double;
@@ -147,8 +205,8 @@ Begin
                 If ArcCount = 1 Then TheArc := Obj_PCB;
             End;
             
-            // --- HIER IST DER TURBO-BOOST ---
-            // Sobald wir eine gültige Kombination haben, brechen wir die zeitraubende Suche sofort ab!
+            // --- EARLY-EXIT OPTIMIZATION ---
+            // As soon as we have a valid combination, stop the time-consuming search immediately!
             If (TrackCount = 2) And (ArcCount = 0) Then Break; 
             If (TrackCount = 1) And (ArcCount = 1) Then Break;
         End;
@@ -159,11 +217,11 @@ Begin
     RunMode := 0;
     If (TrackCount = 2) And (ArcCount = 0) Then RunMode := 1
     Else If (TrackCount = 1) And (ArcCount = 1) Then RunMode := 2
-    Else Begin ShowMessage('Bitte wähle entweder genau ZWEI verbundene Tracks ODER genau EINEN Track und EINEN Arc aus!'); Exit; End;
+    Else Begin ShowMessage('Please select either exactly TWO connected tracks OR exactly ONE track and ONE arc!'); Exit; End;
 
-    InputStr := '1.0'; // Startwert merken
+    InputStr := '1.0'; // remember the initial value
 
-    // --- DIE GROSSE SCHLEIFE ---
+    // --- MAIN LOOP ---
     While True Do 
     Begin
         Form := TForm.Create(Nil);
@@ -173,12 +231,12 @@ Begin
         LabelInfo := TLabel.Create(Form); LabelInfo.Parent := Form; LabelInfo.Caption := 'Radius in mm:'; LabelInfo.Left := 20; LabelInfo.Top := 15;
         EditRadius := TEdit.Create(Form); EditRadius.Parent := Form; EditRadius.Text := InputStr; EditRadius.Left := 20; EditRadius.Top := 35; EditRadius.Width := 190;
         BtnOk := TButton.Create(Form); BtnOk.Parent := Form; BtnOk.Caption := 'OK'; BtnOk.ModalResult := mrOk; BtnOk.Left := 20; BtnOk.Top := 75;
-        BtnCancel := TButton.Create(Form); BtnCancel.Parent := Form; BtnCancel.Caption := 'Abbrechen'; BtnCancel.ModalResult := mrCancel; BtnCancel.Left := 110; BtnCancel.Top := 75;
+        BtnCancel := TButton.Create(Form); BtnCancel.Parent := Form; BtnCancel.Caption := 'Cancel'; BtnCancel.ModalResult := mrCancel; BtnCancel.Left := 110; BtnCancel.Top := 75;
 
         If Form.ShowModal = mrOk Then Begin InputStr := EditRadius.Text; Form.Free; End Else Begin Form.Free; Exit; End;
 
         RadiusVal := StringToFloatSafe(InputStr);
-        If RadiusVal <= 0.0 Then Begin ShowMessage('Ungültiger Radius! Muss größer als 0 sein.'); Continue; End;
+        If RadiusVal <= 0.0 Then Begin ShowMessage('Invalid radius! Must be greater than 0.'); Continue; End;
 
         Orig_T1_X1 := Track1.X1; Orig_T1_Y1 := Track1.Y1; Orig_T1_X2 := Track1.X2; Orig_T1_Y2 := Track1.Y2;
         If RunMode = 1 Then Begin
@@ -188,7 +246,7 @@ Begin
         End;
 
         // =================================================================
-        // MODUS 1: TRACK + TRACK
+        // MODE 1: TRACK + TRACK
         // =================================================================
         If RunMode = 1 Then 
         Begin
@@ -204,21 +262,21 @@ Begin
             End Else If (Track1.X2 = Track2.X2) And (Track1.Y2 = Track2.Y2) Then Begin
                 N_X := CToMM(Track1.X2); N_Y := CToMM(Track1.Y2);
                 E1_X := CToMM(Track1.X1); E1_Y := CToMM(Track1.Y1); E2_X := CToMM(Track2.X1); E2_Y := CToMM(Track2.Y1);
-            End Else Begin ShowMessage('Die Tracks sind nicht an ihren Endpunkten verbunden!'); Exit; End;
+            End Else Begin ShowMessage('The tracks are not connected at their endpoints!'); Exit; End;
 
             v1x := E1_X - N_X; v1y := E1_Y - N_Y; v2x := E2_X - N_X; v2y := E2_Y - N_Y;
             len1 := Sqrt(v1x*v1x + v1y*v1y); len2 := Sqrt(v2x*v2x + v2y*v2y);
-            If (len1 = 0) Or (len2 = 0) Then Begin ShowMessage('Fehler: Eine Track-Länge ist 0!'); Exit; End;
+            If (len1 = 0) Or (len2 = 0) Then Begin ShowMessage('Error: A track length is 0!'); Exit; End;
 
             u1x := v1x / len1; u1y := v1y / len1; u2x := v2x / len2; u2y := v2y / len2;
             dot := u1x*u2x + u1y*u2y;
-            If dot > 0.9999 Then Begin ShowMessage('Tracks sind parallel!'); Exit; End;
-            If dot < -0.9999 Then Begin ShowMessage('Tracks liegen in einer Linie (180°)'); Exit; End;
+            If dot > 0.9999 Then Begin ShowMessage('Tracks are parallel!'); Exit; End;
+            If dot < -0.9999 Then Begin ShowMessage('Tracks are collinear (180 deg)'); Exit; End;
 
             theta := ArcCos(dot); alpha := theta / 2.0;
             d := RadiusVal / (Sin(alpha) / Cos(alpha)); h := RadiusVal / Sin(alpha);
 
-            If (d > len1) Or (d > len2) Then Begin ShowMessage('Radius zu groß! Er überlappt die Leiterbahnen.'); Continue; End;
+            If (d > len1) Or (d > len2) Then Begin ShowMessage('Radius too large! It overlaps the tracks.'); Continue; End;
 
             T1x := N_X + u1x * d; T1y := N_Y + u1y * d; T2x := N_X + u2x * d; T2y := N_Y + u2y * d;
             ubx := u1x + u2x; uby := u1y + u2y; lenb := Sqrt(ubx*ubx + uby*uby);
@@ -250,7 +308,7 @@ Begin
         End
         
         // =================================================================
-        // MODUS 2: TRACK + ARC
+        // MODE 2: TRACK + ARC
         // =================================================================
         Else If RunMode = 2 Then 
         Begin
@@ -264,7 +322,7 @@ Begin
             Else If Dist(T1_X, T1_Y, Ae_X, Ae_Y) < 0.05 Then Begin N_X:=T1_X; N_Y:=T1_Y; Tfar_X:=T2_X; Tfar_Y:=T2_Y; NodeIsTrack1:=True; NodeIsArcStart:=False; End
             Else If Dist(T2_X, T2_Y, As_X, As_Y) < 0.05 Then Begin N_X:=T2_X; N_Y:=T2_Y; Tfar_X:=T1_X; Tfar_Y:=T1_Y; NodeIsTrack1:=False; NodeIsArcStart:=True; End
             Else If Dist(T2_X, T2_Y, Ae_X, Ae_Y) < 0.05 Then Begin N_X:=T2_X; N_Y:=T2_Y; Tfar_X:=T1_X; Tfar_Y:=T1_Y; NodeIsTrack1:=False; NodeIsArcStart:=False; End
-            Else Begin ShowMessage('Track und Arc sind nicht an ihren Endpunkten verbunden!'); Exit; End;
+            Else Begin ShowMessage('The track and arc are not connected at their endpoints!'); Exit; End;
 
             ut_X := Tfar_X - N_X; ut_Y := Tfar_Y - N_Y;
             len := Sqrt(ut_X*ut_X + ut_Y*ut_Y); If len = 0 Then Exit;
@@ -319,7 +377,7 @@ Begin
                 End;
             End;
 
-            If Not HasSolution Then Begin ShowMessage('Radius ist zu groß oder geometrisch unmöglich!'); Continue; End;
+            If Not HasSolution Then Begin ShowMessage('Radius is too large or geometrically impossible!'); Continue; End;
 
             Tp_X := N_X + Best_t * ut_X; Tp_Y := N_Y + Best_t * ut_Y;
             If NodeIsTrack1 Then Begin Track1.X1 := MMToC(Tp_X); Track1.Y1 := MMToC(Tp_Y); End
@@ -345,30 +403,30 @@ Begin
             Board.AddPCBObject(NewArc);
         End;
 
-        // --- BILD AKTUALISIEREN FÜR VORSCHAU ---
+        // --- REFRESH VIEW FOR PREVIEW ---
         Try Client.SendMessage('PCB:Zoom', 'Action=Redraw' , 255, Client.CurrentView); Except End;
 
-        // --- INTERAKTIVE PRÜFUNG (Behalten oder Zurück?) ---
+        // --- INTERACTIVE CHECK (Keep or Revert?) ---
         FormCheck := TForm.Create(Nil);
-        FormCheck.Caption := 'Ergebnis überprüfen';
+        FormCheck.Caption := 'Review Result';
         FormCheck.Width := 290; FormCheck.Height := 120; FormCheck.Position := poScreenCenter;
 
         BtnKeep := TButton.Create(FormCheck);
-        BtnKeep.Parent := FormCheck; BtnKeep.Caption := 'Behalten'; BtnKeep.ModalResult := mrOk; BtnKeep.Left := 15; BtnKeep.Top := 30; BtnKeep.Width := 80;
+        BtnKeep.Parent := FormCheck; BtnKeep.Caption := 'Keep'; BtnKeep.ModalResult := mrOk; BtnKeep.Left := 15; BtnKeep.Top := 30; BtnKeep.Width := 80;
 
         BtnChange := TButton.Create(FormCheck);
-        BtnChange.Parent := FormCheck; BtnChange.Caption := 'Ändern'; BtnChange.ModalResult := mrRetry; BtnChange.Left := 105; BtnChange.Top := 30; BtnChange.Width := 80;
+        BtnChange.Parent := FormCheck; BtnChange.Caption := 'Change'; BtnChange.ModalResult := mrRetry; BtnChange.Left := 105; BtnChange.Top := 30; BtnChange.Width := 80;
 
         BtnCancelAction := TButton.Create(FormCheck);
-        BtnCancelAction.Parent := FormCheck; BtnCancelAction.Caption := 'Abbrechen'; BtnCancelAction.ModalResult := mrCancel; BtnCancelAction.Left := 195; BtnCancelAction.Top := 30; BtnCancelAction.Width := 80;
+        BtnCancelAction.Parent := FormCheck; BtnCancelAction.Caption := 'Cancel'; BtnCancelAction.ModalResult := mrCancel; BtnCancelAction.Left := 195; BtnCancelAction.Top := 30; BtnCancelAction.Width := 80;
 
         Res := FormCheck.ShowModal;
         FormCheck.Free;
 
-        // --- ENTSCHEIDUNG AUSWERTEN ---
+        // --- EVALUATE DECISION ---
         If Res = mrOk Then 
         Begin
-            Break; // User ist zufrieden -> Beende die Schleife!
+            Break; // User is satisfied -> exit the loop!
         End 
         Else 
         Begin
